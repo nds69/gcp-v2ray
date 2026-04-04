@@ -361,6 +361,14 @@ show_kv "Path:" "/@fnetvpn"
 show_kv "SNI:" "vpn.googleapis.com"
 show_divider
 
+# =================== Date Calculation ===================
+export TZ="Asia/Yangon"
+START_EPOCH="$(date +%s)"
+END_EPOCH="$(( START_EPOCH + 5*3600 ))"
+fmt_dt(){ date -d @"$1" "+%d.%m.%Y %I:%M %p"; }
+START_LOCAL="$(fmt_dt "$START_EPOCH")"
+END_LOCAL="$(fmt_dt "$END_EPOCH")"
+
 # =================== Telegram Notification ===================
 if [[ -n "${TELEGRAM_TOKEN:-}" && ${#CHAT_ID_ARR[@]} -gt 0 ]]; then
   MSG=$(cat <<EOF
@@ -371,6 +379,8 @@ if [[ -n "${TELEGRAM_TOKEN:-}" && ${#CHAT_ID_ARR[@]} -gt 0 ]]; then
 🔗 <b>Endpoint:</b> <a href="${SERVICE_URL}">${SERVICE_URL}</a></blockquote>
 🔑 <b>VLESS Configuration:</b>
 <pre><code>${URI}</code></pre>
+<blockquote>🕒 <b>Deployed:</b> ${START_LOCAL}
+⏳ <b>Expires:</b> ${END_LOCAL}</blockquote>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 <b>Powered by FNET VPN</b>
 EOF
