@@ -38,7 +38,7 @@ show_fnet_banner() {
   printf "║   ██║     ██║ ╚████║███████╗   ██║        ╚████╔╝ ██║     ██║ ╚████║ ║\n"
   printf "║   ╚═╝     ╚═╝  ╚═══╝╚══════╝   ╚═╝         ╚═══╝  ╚═╝     ╚═╝  ╚═══╝ ║\n"
   printf "║                                                                  ║\n"
-  printf "║         ${C_FNET_YELLOW}🚀 SSH over WEBSOCKET SYSTEM => VERSION - 2.1          ${C_FNET_RED}║\n"
+  printf "║         ${C_FNET_YELLOW}🚀 SSH over WEBSOCKET SYSTEM => VERSION - 2.2          ${C_FNET_RED}║\n"
   printf "║         ${C_FNET_GREEN}⚡ Powered by FNET Developer                           ${C_FNET_RED}║\n"
   printf "╚══════════════════════════════════════════════════════════════════╝${RESET}\n\n"
 }
@@ -100,8 +100,18 @@ fi
 END_LOCAL="$(date -d @"$(( START_EPOCH + ADD_SECS ))" "+%I:%M %p")"
 show_success "Expire Time set to: $END_LOCAL"
 
-# =================== Step 3: Build Server ===================
-show_step "03" "Building SSH WS Proxy Server"
+# =================== Step 3: Enable APIs (CRITICAL FIX) ===================
+show_step "03" "GCP API Enablement"
+APIS_TO_ENABLE=("run.googleapis.com" "cloudbuild.googleapis.com" "artifactregistry.googleapis.com")
+for api in "${APIS_TO_ENABLE[@]}"; do
+  if ! gcloud services list --enabled --filter="config.name:$api" --format="value(config.name)" | grep -q "$api"; then
+    run_with_progress "Enabling $api" gcloud services enable "$api" --quiet
+  fi
+done
+show_success "Required APIs enabled successfully."
+
+# =================== Step 4: Build Server ===================
+show_step "04" "Building SSH WS Proxy Server"
 BUILD_DIR=$(mktemp -d); cd "$BUILD_DIR"
 cat << 'EOF' > proxy.py
 import asyncio, websockets
@@ -137,16 +147,16 @@ EXPOSE 8080
 CMD ["/bin/bash", "-c", "/usr/sbin/sshd && python3 /app/proxy.py"]
 EOF
 
-# =================== Step 4: Deploy ===================
-show_step "04" "Cloud Run Deployment"
+# =================== Step 5: Deploy ===================
+show_step "05" "Cloud Run Deployment"
 SERVICE="fnet-ssh-ws-$(date +%s)"
 REGION="us-central1"
 
 run_with_progress "Deploying Server to Cloud Run" \
   gcloud run deploy "$SERVICE" --source="." --region="$REGION" --platform=managed --allow-unauthenticated --port=8080 --quiet
 
-# =================== Step 5: GET ACTUAL URL (RETRY LOOP) ===================
-show_step "05" "Fetching Cloud Run URL"
+# =================== Step 6: Fetching Cloud Run URL ===================
+show_step "06" "Fetching Cloud Run URL"
 show_info "Waiting for Google to assign URL..."
 SERVICE_URL=""
 for i in {1..15}; do
@@ -158,15 +168,15 @@ for i in {1..15}; do
 done
 
 if [[ -z "$SERVICE_URL" ]]; then
-  show_error "URL ကို ဆွဲယူလို့ မရပါ။ Cloud Console ထဲတွင် သွားရောက်ကူးယူပါ။"
+  show_error "URL ကို ဆွဲယူလို့ မရပါ။ Deployment Failed ဖြစ်သွားနိုင်ပါသည်။"
   exit 1
 fi
 
 HOST_URL=$(echo "$SERVICE_URL" | sed 's#^https://##; s#/$##')
 show_success "URL fetched: $HOST_URL"
 
-# =================== Step 6: Final Result & Telegram ===================
-show_step "06" "Deployment Finished"
+# =================== Step 7: Final Result & Telegram ===================
+show_step "07" "Deployment Finished"
 
 PAYLOAD="GET / HTTP/1.1[crlf]Host: ${HOST_URL}[crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]"
 
