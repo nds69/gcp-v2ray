@@ -38,7 +38,7 @@ show_fnet_banner() {
   printf "║   ██║     ██║ ╚████║███████╗   ██║        ╚████╔╝ ██║     ██║ ╚████║ ║\n"
   printf "║   ╚═╝     ╚═╝  ╚═══╝╚══════╝   ╚═╝         ╚═══╝  ╚═╝     ╚═╝  ╚═══╝ ║\n"
   printf "║                                                                  ║\n"
-  printf "║         ${C_FNET_YELLOW}🚀 SSH over WEBSOCKET SYSTEM => VERSION - 2.4          ${C_FNET_RED}║\n"
+  printf "║         ${C_FNET_YELLOW}🚀 SSH over WEBSOCKET SYSTEM => VERSION - 2.5          ${C_FNET_RED}║\n"
   printf "║         ${C_FNET_GREEN}⚡ Powered by FNET Developer                           ${C_FNET_RED}║\n"
   printf "╚══════════════════════════════════════════════════════════════════╝${RESET}\n\n"
 }
@@ -110,30 +110,33 @@ for api in "${APIS_TO_ENABLE[@]}"; do
 done
 show_success "Required APIs enabled successfully."
 
-# =================== Step 4: Build Server (VPN Bypass Fix) ===================
-show_step "04" "Building SSH WS Proxy Server (Fake WS Supported)"
+# =================== Step 4: Build Server ===================
+show_step "04" "Building Full Network SSH WS Server"
 BUILD_DIR=$(mktemp -d); cd "$BUILD_DIR"
 
-# Raw TCP Python Proxy (VPN App တွေရဲ့ Fake WS Payload ကို အပြည့်အဝ လက်ခံသည်)
+# Python Proxy (Fixed Drop Bytes Issue)
 cat << 'EOF' > proxy.py
 import asyncio, os
 
 async def handle_client(reader, writer):
     try:
-        # HTTP Handshake ဖတ်မည်
         req = b""
         while b"\r\n\r\n" not in req:
             chunk = await reader.read(4096)
             if not chunk: break
             req += chunk
         
-        # VPN App တွေအတွက် 101 Switching Protocols ကို လိုအပ်ချက်မရှိ အတင်းပို့ပေးမည်
         res = b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
         writer.write(res)
         await writer.drain()
 
-        # Local SSH ဆီသို့ လမ်းကြောင်းလွှဲမည်
         ssh_reader, ssh_writer = await asyncio.open_connection('127.0.0.1', 22)
+
+        # Forward leftover bytes to SSH if any came with HTTP header
+        parts = req.split(b"\r\n\r\n", 1)
+        if len(parts) > 1 and len(parts[1]) > 0:
+            ssh_writer.write(parts[1])
+            await ssh_writer.drain()
 
         async def pipe(r, w):
             try:
@@ -161,25 +164,40 @@ if __name__ == "__main__":
     asyncio.run(main())
 EOF
 
-# websockets library ဖြုတ်ပစ်လိုက်ပါပြီ
+# Advanced SSHD Configuration for Internet Access
 cat << 'EOF' > Dockerfile
 FROM alpine:latest
-RUN apk add --no-cache openssh python3 bash
-RUN ssh-keygen -A && echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+RUN apk add --no-cache openssh python3 bash iproute2 curl
+RUN ssh-keygen -A && \
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
     echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config && \
+    echo "GatewayPorts yes" >> /etc/ssh/sshd_config && \
+    echo "PermitTunnel yes" >> /etc/ssh/sshd_config && \
+    echo "ClientAliveInterval 60" >> /etc/ssh/sshd_config && \
+    echo "AddressFamily inet" >> /etc/ssh/sshd_config && \
     adduser -D -s /bin/bash fnet && echo "fnet:fnet" | chpasswd
 COPY proxy.py /app/proxy.py
 EXPOSE 8080
 CMD ["/bin/bash", "-c", "/usr/sbin/sshd && python3 /app/proxy.py"]
 EOF
 
-# =================== Step 5: Deploy ===================
-show_step "05" "Cloud Run Deployment"
+# =================== Step 5: Deploy (Gen 2 Fix) ===================
+show_step "05" "Cloud Run Deployment (Gen 2 Environment)"
 SERVICE="fnet-ssh-ws-$(date +%s)"
 REGION="us-central1"
 
-run_with_progress "Deploying Server to Cloud Run" \
-  gcloud run deploy "$SERVICE" --source="." --region="$REGION" --platform=managed --allow-unauthenticated --port=8080 --quiet
+# --execution-environment=gen2 နဲ့ --timeout=3600 က Ping Timeout ကို ဖြေရှင်းပေးမယ့် အဓိက သော့ချက်ပါ
+run_with_progress "Deploying Gen-2 Server to Cloud Run" \
+  gcloud run deploy "$SERVICE" \
+  --source="." \
+  --region="$REGION" \
+  --platform=managed \
+  --allow-unauthenticated \
+  --port=8080 \
+  --execution-environment=gen2 \
+  --timeout=3600 \
+  --quiet
 
 # =================== Step 6: Fetching Cloud Run URL ===================
 show_step "06" "Fetching Cloud Run URL"
